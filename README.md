@@ -25,6 +25,10 @@ El principio que ordena el diseño: **la IA lee, el código calcula, la persona 
 | Canal de entrada y salida | Gmail |
 | Validación humana | Telegram (Send and Wait for Response) |
 
+> **Sobre el uso de OpenRouter.** El procesamiento con IA se realiza a través de OpenRouter, una pasarela que expone con una única API y una única credencial el catálogo de modelos de distintos proveedores (OpenAI, Anthropic, Google y otros). El flujo no se integra contra un proveedor en particular sino contra la pasarela, de modo que el modelo es un parámetro configurable del nodo. Esta aclaración fue consultada y validada con el profesor de la comisión.
+>
+> La matriz de decisión de modelos (criterio 3) se construyó de forma teórica sobre los precios de lista publicados por cada proveedor, con estimación de costo por tokens de entrada y salida, según lo indicado por la cátedra.
+
 ---
 
 ## Entregables
@@ -52,22 +56,35 @@ La vista de facturas está agrupada por estado y por código de rechazo, con tot
 
 ### Flujo
 
-[`workflow/entrega-final-ai-automation.json`](workflow/entrega-final-ai-automation.json) — exportación del workflow de n8n. No contiene credenciales: las referencias apuntan al gestor de n8n, no a los valores.
+Carpeta [`/workflow`](workflow) — exportación del workflow de n8n en formato JSON. No contiene credenciales: las referencias apuntan al gestor de credenciales de n8n, no a los valores.
 
 ### Video demo
 
-[`video/demo.mp4`](video/demo.mp4) — 2:09. Muestra el trigger, el procesamiento en el orquestador y el resultado final.
+Carpeta [`/video`](video) — 1:30. Muestra el trigger, el procesamiento en el orquestador y el resultado final.
 
 > **Nota.** La aprobación por Telegram se responde desde el celular, fuera de cámara. El formulario de validación humana se abre con una firma de autorización visible en la URL, y mostrarla en la grabación equivaldría a exponer una credencial.
 
 ### Capturas (`/capturas`)
 
+**Estructura y datos**
+
 | Archivo | Contenido |
 |---|---|
 | `flujo-canvas.png` | El workflow completo en el editor de n8n |
-| `ejecuciones.png` | Lista de ejecuciones del test de estrés |
+| `lista-ejecuciones.png` | Lista de ejecuciones del test de estrés |
 | `airtable-facturas.png` | Los cinco registros del test, agrupados por estado y código |
 | `airtable-log-errores.png` | Registro de errores capturados por las rutas de error |
+
+**Circuito completo de una factura derivada a supervisión humana**
+
+| Archivo | Contenido |
+|---|---|
+| `gmail-factura-recibida.png` | El correo entrante con el comprobante adjunto |
+| `ejecucion-waiting.png` | La ejecución pausada, esperando la decisión humana |
+| `telegram-solicitud-aprobacion.png` | La solicitud de aprobación con el detalle de la factura |
+| `formulario-aprobacion.png` | El formulario de decisión: aprobar, rechazar o derivar |
+| `ejecucion-reanudada.png` | La misma ejecución, reanudada tras la respuesta |
+| `gmail-aviso-aprobacion.png` | El aviso de aprobación enviado al proveedor |
 
 ---
 
@@ -110,6 +127,7 @@ El esquema completo, con tipos y origen de cada campo, está en el manual operat
 | Solo PDF con texto seleccionable | Modelo con visión para leer escaneos | Más caro, y el rechazo pasaría a depender de la interpretación del modelo |
 | Pasarela en vez de proveedor directo | Integración contra la API de un proveedor | El modelo es un parámetro: se sustituyó siete veces sin tocar el flujo |
 | Rutas de error por nodo | Workflow de error global | Permite reaccionar según qué falló y deja el registro en la misma base |
+| Valores de entorno en un nodo `Config` | Escribirlos en cada nodo que los usa | Un cambio de entorno se resuelve en un solo lugar y queda visible en el canvas |
 | Avisos con plantillas | Redacción por IA | Texto con valor operativo: debe ser idéntico ante el mismo código |
 
 ---
