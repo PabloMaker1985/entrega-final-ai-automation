@@ -1,0 +1,3359 @@
+{
+  "name": "Entrega Final AI Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {},
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -3472,
+        384
+      ],
+      "id": "201cb3e9-7da9-452a-9212-bc53272eabcb",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BdspeodFGW7oSDjy",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_BYTES = 5 * 1024 * 1024;\nconst salida = [];\n\nfor (const item of $input.all()) {\n  const h = item.json.headers || {};\n  const asunto = (h.subject || '').replace(/^Subject:\\s*/i, '').trim();\n  const from = h.from || '';\n  const bin = item.binary || {};\n  const adjuntos = Object.keys(bin);\n\n  const emailMatch = from.match(/<([^>]+)>/);\n  const email_remitente = (emailMatch ? emailMatch[1] : from).toLowerCase().trim();\n\n  let codigo = null;\n  let motivo = null;\n  let cuit_asunto = null;\n  let numero_factura = null;\n\n  const m = asunto.match(/^FACTURA - (\\d{11}) - ([ABC])(\\d{5})(\\d{8})$/);\n  if (!m) {\n    codigo = 'RC-02';\n    motivo = 'Asunto con formato invalido';\n  } else {\n    cuit_asunto = m[1];\n    numero_factura = m[2] + m[3] + m[4];\n  }\n\n  if (!codigo && adjuntos.length === 0) {\n    codigo = 'RC-03';\n    motivo = 'Correo sin adjunto';\n  }\n\n  if (!codigo && adjuntos.length > 1) {\n    codigo = 'RC-04';\n    motivo = 'Mas de un adjunto en el mismo correo';\n  }\n\n  if (!codigo) {\n    const a = bin[adjuntos[0]];\n    const nombre = (a.fileName || '').toLowerCase();\n    const esPdf = a.mimeType === 'application/pdf' || nombre.endsWith('.pdf');\n    if (!esPdf) {\n      codigo = 'RC-05';\n      motivo = 'Formato de archivo no admitido';\n    } else {\n      const bytes = a.data\n        ? Math.floor(a.data.length * 0.75)\n        : Number(item.json.sizeEstimate || 0);\n      if (bytes > MAX_BYTES) {\n        codigo = 'RC-07';\n        motivo = 'Archivo que excede el tamano maximo';\n      }\n    }\n  }\n\n  salida.push({\n    json: {\n      gmail_id: item.json.id,\n      email_remitente,\n      asunto,\n      cuit_asunto,\n      numero_factura,\n      adjunto_key: adjuntos[0] || null,\n      rechazado: codigo !== null,\n      codigo_rechazo: codigo,\n      motivo_rechazo: motivo,\n    },\n    binary: item.binary,\n  });\n}\n\nreturn salida;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3072,
+        384
+      ],
+      "id": "a6cb5280-316f-4385-974c-f6b56bd12808",
+      "name": "Validaciones de sobre"
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblHN2IjK51sUVUkv",
+          "mode": "list",
+          "cachedResultName": "Proveedores",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblHN2IjK51sUVUkv"
+        },
+        "filterByFormula": "={cuit} = \"{{ $json.cuit_asunto }}\"",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -2848,
+        384
+      ],
+      "id": "4fe67142-3cf9-445a-85ac-4b6c27c8702c",
+      "name": "Buscar proveedor",
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "attachment_0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -2176,
+        384
+      ],
+      "id": "10cea3e3-e367-4cbe-ae8c-da191415a155",
+      "name": "Extraer texto PDF"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sobre = $('Validaciones de sobre').first();\nconst encontrados = $input.all();\n\nconst hayProveedor = encontrados.length > 0 && encontrados[0].json.id;\nconst p = hayProveedor ? encontrados[0].json.fields : {};\n\nlet codigo = null;\nlet motivo = null;\n\nif (!hayProveedor) {\n  codigo = 'RC-01';\n  motivo = 'CUIT no registrado en el legajo de proveedores';\n}\n\nreturn [{\n  json: {\n    ...sobre.json,\n    proveedor_id: hayProveedor ? encontrados[0].json.id : null,\n    razon_social: p.razon_social || null,\n    plazo_pago_dias: p.plazo_pago_dias || null,\n    monto_max_auto: p.monto_max_auto || null,\n    rechazado: sobre.json.rechazado === true || codigo !== null,\n    codigo_rechazo: sobre.json.codigo_rechazo || codigo,\n    motivo_rechazo: sobre.json.motivo_rechazo || motivo,\n  },\n  binary: sobre.binary,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2624,
+        384
+      ],
+      "id": "476d8afc-d63d-4e31-aa5e-f69eeb95f07c",
+      "name": "Armar contexto"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Armar contexto').first();\nconst pdf = $input.first().json;\nconst texto = (pdf.text || '').trim();\n\nlet codigo = null;\nlet motivo = null;\n\nif (texto.length < 50) {\n  codigo = 'RC-06';\n  motivo = 'PDF sin texto seleccionable';\n}\n\nreturn [{\n  json: {\n    ...ctx.json,\n    texto_pdf: texto,\n    paginas_pdf: pdf.numpages || null,\n    rechazado: ctx.json.rechazado === true || codigo !== null,\n    codigo_rechazo: ctx.json.codigo_rechazo || codigo,\n    motivo_rechazo: ctx.json.motivo_rechazo || motivo,\n  },\n  binary: ctx.binary,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1952,
+        384
+      ],
+      "id": "78dc68ce-b4e3-415d-8b40-d856dff643b5",
+      "name": "Validar texto PDF"
+    },
+    {
+      "parameters": {
+        "model": "inclusionai/ling-3.0-flash-fin:free",
+        "options": {
+          "maxTokens": 2500,
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1792,
+        592
+      ],
+      "id": "8fa4fc69-42af-48a9-b26c-016c81629e3f",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "RdGjS5jQ3bd7O0aS",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=IMPORTANTE: Respondé unicamente con el objeto JSON. No expliques tu razonamiento,\nno analices el texto en voz alta, no muestres pasos intermedios, no repitas estas\ninstrucciones. Tu respuesta debe empezar con el caracter { y terminar con el\ncaracter }. Cualquier texto fuera del JSON invalida la respuesta.\n\nExtraé los datos de la siguiente factura argentina y devolvé únicamente un objeto JSON, sin texto adicional ni marcas de código.\n\nCampos a devolver:\n- cuit_emisor: string, solo los 11 dígitos sin guiones\n- razon_social_emisor: string\n- fecha_emision: string en formato AAAA-MM-DD\n- neto: número\n- iva: número\n- total: número\n- confianza: número entre 0 y 1, qué tan seguro estás de haber leído bien los importes\n\nReglas:\n- Devolvé los números tal como figuran impresos. No calcules ni corrijas nada.\n- Usá punto como separador decimal y no uses separador de miles.\n- Si un campo no aparece, poné null.\n\nTexto de la factura:\n{{ $json.texto_pdf }}\n",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -1728,
+        384
+      ],
+      "id": "9d0344da-9b66-4dd1-a519-a90ef8867baf",
+      "name": "Extraer datos IA",
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Validar texto PDF').first();\nconst crudo = $input.first().json.text || '';\n\nlet ia = null;\nlet codigo = null;\nlet motivo = null;\nlet discrepancias = [];\n\ntry {\n  let limpio = crudo.replace(/```json/gi, '').replace(/```/g, '').trim();\n  const desde = limpio.indexOf('{');\n  const hasta = limpio.lastIndexOf('}');\n  if (desde !== -1 && hasta !== -1) limpio = limpio.slice(desde, hasta + 1);\n  limpio = limpio.replace(/:(\\s*)(-?\\d+(?:\\.\\d+)?)\"/g, ':$1$2');\n  ia = JSON.parse(limpio);\n} catch (e) {\n  return [{\n    json: {\n      ...ctx.json,\n      rechazado: ctx.json.rechazado === true,\n      requiere_revision: ctx.json.rechazado !== true,\n      codigo_rechazo: ctx.json.codigo_rechazo || null,\n      motivo_rechazo: ctx.json.motivo_rechazo || 'La IA devolvio una respuesta no parseable',\n      confianza_ia: 0,\n      supera_tope: false,\n      confianza_baja: true,\n      discrepancias: 'La IA devolvio una respuesta no parseable',\n    },\n    binary: ctx.binary,\n  }];\n}\n\nconst neto = Number(ia.neto) || 0;\nconst iva = Number(ia.iva) || 0;\nconst total = Number(ia.total) || 0;\nconst confianza = Number(ia.confianza ?? ia.confidence) || 0;\n\nconst suma = Math.round((neto + iva) * 100) / 100;\nconst totalRedondeado = Math.round(total * 100) / 100;\n\nif (Math.abs(suma - totalRedondeado) > 0.01) {\n  codigo = 'RC-09';\n  motivo = 'Inconsistencia entre neto, IVA y total';\n  discrepancias.push(\n    `Neto ${neto} + IVA ${iva} = ${suma}, pero el total impreso es ${totalRedondeado}`\n  );\n}\n\nconst cuitIA = String(ia.cuit_emisor || '').replace(/\\D/g, '');\nif (!codigo && cuitIA !== ctx.json.cuit_asunto) {\n  codigo = 'RC-10';\n  motivo = 'CUIT del emisor no coincide con el asunto';\n  discrepancias.push(\n    `CUIT en el PDF: ${cuitIA}, CUIT en el asunto: ${ctx.json.cuit_asunto}`\n  );\n}\n\nlet vencimiento = null;\nif (ia.fecha_emision && ctx.json.plazo_pago_dias) {\n  const d = new Date(ia.fecha_emision + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + Number(ctx.json.plazo_pago_dias));\n  const dia = d.getUTCDay();\n  if (dia === 6) d.setUTCDate(d.getUTCDate() + 2);\n  if (dia === 0) d.setUTCDate(d.getUTCDate() + 1);\n  vencimiento = d.toISOString().slice(0, 10);\n}\n\nconst superaTope =\n  ctx.json.monto_max_auto !== null && total > Number(ctx.json.monto_max_auto);\n\nif (superaTope) {\n  discrepancias.push(\n    `Total ${total} supera el tope automatico de ${ctx.json.monto_max_auto}`\n  );\n}\n\nconst confianzaBaja = confianza < 0.7;\nif (confianzaBaja) {\n  discrepancias.push(`Confianza de lectura baja: ${confianza}`);\n}\n\nconst rechazadoFinal = ctx.json.rechazado === true || codigo !== null;\n\nreturn [{\n  json: {\n    ...ctx.json,\n    cuit_emisor: cuitIA || null,\n    razon_social_emisor: ia.razon_social_emisor || null,\n    fecha_emision: ia.fecha_emision || null,\n    fecha_vencimiento: vencimiento,\n    neto,\n    iva,\n    total,\n    confianza_ia: confianza,\n    rechazado: rechazadoFinal,\n    codigo_rechazo: ctx.json.codigo_rechazo || codigo,\n    motivo_rechazo: ctx.json.motivo_rechazo || motivo,\n    requiere_revision: !rechazadoFinal && (superaTope || confianzaBaja),\n    supera_tope: superaTope,\n    confianza_baja: confianzaBaja,\n    discrepancias: discrepancias.join(' | '),\n  },\n  binary: ctx.binary,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        368
+      ],
+      "id": "5c434079-3b5e-4c64-b0bc-73f5b9ba0977",
+      "name": "Verificar y calcular"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.rechazado }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "b04b403c-cd22-4d53-9275-398519a70a96"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rechazada"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a395ff47-5ed2-432c-85c3-fc8af2154740",
+                    "leftValue": "={{ $json.requiere_revision }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "revision"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -1136,
+        352
+      ],
+      "id": "60938700-fae6-477e-89a6-20230081c096",
+      "name": "Rutear factura"
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numero_factura": "={{ $json.numero_factura || $json.asunto }}",
+            "email_remitente": "={{ $json.email_remitente }}",
+            "neto": "={{ $json.neto || null }}",
+            "iva": "={{ $json.iva || null }}",
+            "total": "={{ $json.total || null }}",
+            "confianza_ia": "={{ $json.confianza_ia || null }}",
+            "estado": "Rechazada",
+            "codigo_rechazo": "={{ $json.codigo_rechazo }}",
+            "discrepancias": "={{ $json.motivo_rechazo }}",
+            "fecha_emision": "={{ $json.fecha_emision || null }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -848,
+        160
+      ],
+      "id": "9847f15e-35f7-4b09-a1ec-9762702f7ed5",
+      "name": "Guardar Rechazo",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numero_factura": "={{ $json.numero_factura }}",
+            "email_remitente": "={{ $json.email_remitente }}",
+            "fecha_vencimiento": "={{ $json.fecha_vencimiento }}",
+            "fecha_emision": "={{ $json.fecha_emision }}",
+            "neto": "={{ $json.neto }}",
+            "iva": "={{ $json.iva }}",
+            "total": "={{ $json.total }}",
+            "confianza_ia": "={{ $json.confianza_ia }}",
+            "estado": "Aprobada",
+            "proveedor": "={{ [$json.proveedor_id] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -848,
+        608
+      ],
+      "id": "b35f3aec-87c4-4a30-8914-1b52dba583f3",
+      "name": "Guardar Aprobada",
+      "retryOnFail": true,
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.fields.email_remitente }}",
+        "subject": "=Factura {{ $json.fields.numero_factura }} aprobada - Glowing Beauty S.R.L.",
+        "emailType": "text",
+        "message": "=Estimado proveedor:\n\nLe informamos que la factura {{ $json.fields.numero_factura }} fue recibida y aprobada para el pago.\n\nNumero de comprobante: {{ $json.fields.numero_factura }}\nFecha de emision: {{ $json.fields.fecha_emision }}\nImporte total: $ {{ Number($json.fields.total).toLocaleString('es-AR', { minimumFractionDigits: 2 }) }}\nFecha estimada de pago: {{ $json.fields.fecha_vencimiento }}\n\nEl plazo de pago se computa desde la fecha de emision del comprobante, segun el instructivo de presentacion de facturas vigente.\n\nAnte cualquier consulta, comunicarse con compras@glowingbeauty.com.ar indicando el numero de comprobante y el CUIT del emisor.\n\nDepartamento de Compras\nGlowing Beauty S.R.L.\n\n---\nMensaje generado automaticamente. Documento de uso academico.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -624,
+        608
+      ],
+      "id": "b013874e-b33d-4819-8cdc-2e5df2e7c638",
+      "name": "Avisar aprobacion",
+      "webhookId": "7f4dd680-1e57-4e3d-9dd3-973bf8639c1f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BdspeodFGW7oSDjy",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.fields.email_remitente }}",
+        "subject": "=Factura rechazada {{ $json.fields.codigo_rechazo }} - Glowing Beauty S.R.L.",
+        "message": "=<p>Estimado proveedor:</p>\n\n<p>La presentacion recibida no pudo ser admitida y fue rechazada por el siguiente motivo:</p>\n\n<table cellpadding=\"6\" style=\"border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px\">\n  <tr><td style=\"background:#f2f2f2\"><b>Codigo</b></td><td>{{ $json.fields.codigo_rechazo }}</td></tr>\n  <tr><td style=\"background:#f2f2f2\"><b>Motivo</b></td><td>{{ $json.fields.discrepancias }}</td></tr>\n  <tr><td style=\"background:#f2f2f2\"><b>Comprobante</b></td><td>{{ $json.fields.numero_factura }}</td></tr>\n</table>\n\n<p>Una factura rechazada no genera obligacion de pago ni inicia el computo del plazo acordado.</p>\n\n<p>Corregido el problema, puede reenviar el comprobante como una presentacion nueva a\n<b>facturas@glowingbeauty.com.ar</b>, respetando las condiciones del instructivo de presentacion\nde facturas vigente.</p>\n\n<p>Ante cualquier consulta, comunicarse con <b>compras@glowingbeauty.com.ar</b> indicando el\nnumero de comprobante y el CUIT del emisor.</p>\n\n<p>Departamento de Compras<br>\nGlowing Beauty S.R.L.</p>\n\n<hr>\n<p style=\"font-size:11px;color:#777\">Mensaje generado automaticamente. Documento de uso academico.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -624,
+        160
+      ],
+      "id": "bad80641-177d-44f3-89ca-29684d37b8a1",
+      "name": "Avisar rechazo",
+      "webhookId": "d8299a8a-7166-4fe6-af00-c37b8dc05ae6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BdspeodFGW7oSDjy",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "numero_factura": "={{ $json.numero_factura }}",
+            "email_remitente": "={{ $json.email_remitente }}",
+            "fecha_vencimiento": "={{ $json.fecha_vencimiento }}",
+            "fecha_emision": "={{ $json.fecha_emision }}",
+            "neto": "={{ $json.neto }}",
+            "iva": "={{ $json.iva }}",
+            "total": "={{ $json.total }}",
+            "confianza_ia": "={{ $json.confianza_ia }}",
+            "estado": "Esperando_aprobacion",
+            "proveedor": "={{ [$json.proveedor_id] }}",
+            "discrepancias": "={{ [$json.discrepancias, $json.supera_tope ? 'Monto supera el tope del proveedor' : null, $json.confianza_baja ? 'Confianza de lectura baja' : null].filter(Boolean).join(' | ') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -848,
+        368
+      ],
+      "id": "b34f10dd-6fd1-4665-a4cf-487d7c542c71",
+      "name": "Guardar en revision",
+      "retryOnFail": true,
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "chatId": "={{ $('Config').first().json.telegram_chat_id }}",
+        "message": "=Factura {{ $('Verificar y calcular').first().json.numero_factura }} requiere revisión.\n\nProveedor: {{ $('Verificar y calcular').first().json.razon_social_emisor }}\nCUIT: {{ $('Verificar y calcular').first().json.cuit_emisor }}\nFecha de emisión: {{ $('Verificar y calcular').first().json.fecha_emision }}\nTotal: $ {{ $('Verificar y calcular').first().json.total.toLocaleString('es-AR', { minimumFractionDigits: 2 }) }}\nVencimiento calculado: {{ $('Verificar y calcular').first().json.fecha_vencimiento }}\n\nMotivo: {{ $('Verificar y calcular').first().json.discrepancias }}",
+        "responseType": "customForm",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "decision",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Aprobar"
+                  },
+                  {
+                    "option": "Rechazar"
+                  },
+                  {
+                    "option": "Marcar en revision con el proveedor"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "comentario",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "resumeAmount": 45,
+              "resumeUnit": "minutes"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -624,
+        368
+      ],
+      "id": "ca43f0d0-8ec0-49ab-a22a-e5c57043474e",
+      "name": "Pedir aprobacion Telegram",
+      "webhookId": "ec1e1040-9ba6-418c-8d05-54be566ffb3d",
+      "credentials": {
+        "telegramApi": {
+          "id": "LVNilC41Y38bMavc",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.decision }}",
+                    "rightValue": "Aprobar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "b3a2e0c8-4908-40f6-9d9b-42a4bd77c076"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "aprobar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "01868cdb-a7ad-48d5-b253-80e1cf97a423",
+                    "leftValue": "={{ $json.data.decision }}",
+                    "rightValue": "Rechazar",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rechazar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "fc1cd6e0-eaa5-47b8-b5f1-8655e6afbf96",
+                    "leftValue": "={{ $json.data.decision }}",
+                    "rightValue": "Marcar en revision con el proveedor",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "revision_proveedor"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -336,
+        336
+      ],
+      "id": "41b42eac-3f08-4d69-8780-7d19afcaf94f",
+      "name": "Rutear respuesta"
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Guardar en revision').first().json.id }}",
+            "estado": "Aprobada",
+            "aprobado_por": "Compras - Telegram",
+            "fecha_aprobacion": "={{ $json.data.respondedAt }}",
+            "discrepancias": "={{ $('Guardar en revision').first().json.fields.discrepancias }}{{ $json.data.comentario ? ' | Comentario: ' + $json.data.comentario : '' }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "84b59912-f8d9-4e40-bbd4-9e83312c050f",
+      "name": "Actualizar aprobada",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Guardar en revision').first().json.fields.email_remitente }}",
+        "subject": "=Factura aprobada {{ $('Guardar en revision').first().json.fields.numero_factura }} - Glowing Beauty S.R.L.",
+        "emailType": "text",
+        "message": "=Estimado proveedor:  Le confirmamos que la factura {{ $('Guardar en revision').first().json.fields.numero_factura }} fue aprobada para su pago.  Importe aprobado: $ {{ Number($('Guardar en revision').first().json.fields.total).toLocaleString('es-AR', { minimumFractionDigits: 2 }) }} Fecha estimada de pago: {{ $('Guardar en revision').first().json.fields.fecha_vencimiento }}  Esta confirmacion es el unico acuse valido de la presentacion.  Ante cualquier consulta, comunicarse con compras@glowingbeauty.com.ar indicando el numero de comprobante y el CUIT del emisor.  Departamento de Compras Glowing Beauty S.R.L.  --- Mensaje generado automaticamente. Documento de uso academico.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "3729c6c6-152d-4478-ae67-f94bdfcbf5bc",
+      "name": "Avisar aprobacion HITL",
+      "webhookId": "2e0cb12a-4e2b-4da0-9a8e-8c458bb11457",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BdspeodFGW7oSDjy",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Guardar en revision').first().json.id }}",
+            "estado": "Rechazada",
+            "aprobado_por": "Compras - Telegram",
+            "fecha_aprobacion": "={{ $json.data.respondedAt }}",
+            "discrepancias": "={{ $('Guardar en revision').first().json.fields.discrepancias }}{{ $json.data.comentario ? ' | Comentario: ' + $json.data.comentario : '' }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        272
+      ],
+      "id": "a043a1f9-d164-48df-b1be-8b3d7d83ff96",
+      "name": "Actualizar rechazada",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Guardar en revision').first().json.fields.email_remitente }}",
+        "subject": "=Factura rechazada {{ $('Guardar en revision').first().json.fields.numero_factura }} - Glowing Beauty S.R.L.",
+        "emailType": "text",
+        "message": "=Estimado proveedor:  La factura {{ $('Guardar en revision').first().json.fields.numero_factura }} fue revisada por el Departamento de Compras y no fue admitida.  Motivo: {{ $('Guardar en revision').first().json.fields.discrepancias }}{{ $json.data.comentario ? ' | ' + $json.data.comentario : '' }}  Una factura rechazada no genera obligacion de pago ni inicia el computo del plazo acordado.  Corregido el problema, puede reenviar el comprobante como una presentacion nueva a facturas@glowingbeauty.com.ar, respetando las condiciones del instructivo de presentacion de facturas vigente.  Ante cualquier consulta, comunicarse con compras@glowingbeauty.com.ar indicando el numero de comprobante y el CUIT del emisor.  Departamento de Compras Glowing Beauty S.R.L.  --- Mensaje generado automaticamente. Documento de uso academico.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        272
+      ],
+      "id": "650fa3b9-8a88-4661-9acc-8a9227000099",
+      "name": "Avisar rechazo HITL",
+      "webhookId": "bf142151-1d44-4a10-beca-6cae069b4964",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BdspeodFGW7oSDjy",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Guardar en revision').first().json.id }}",
+            "estado": "En_revision",
+            "aprobado_por": "Compras - Telegram",
+            "fecha_aprobacion": "={{ $json.data.respondedAt }}",
+            "discrepancias": "={{ $('Guardar en revision').first().json.fields.discrepancias }}{{ $json.data.comentario ? ' | Comentario: ' + $json.data.comentario : '' }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        528
+      ],
+      "id": "55199c8d-13d5-489c-93f4-c32a2e19e062",
+      "name": "Actualizar en revision",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFXGI7nMiKeLoik",
+          "mode": "list",
+          "cachedResultName": "Facturas",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tblFXGI7nMiKeLoik"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Guardar en revision').first().json.id }}",
+            "estado": "Esperando_aprobacion",
+            "discrepancias": "={{ $('Guardar en revision').first().json.fields.discrepancias }} | Sin respuesta del aprobador en 45 minutos"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "numero_factura",
+              "displayName": "numero_factura",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "proveedor",
+              "displayName": "proveedor",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "plazo_pago_dias (from proveedor)",
+              "displayName": "plazo_pago_dias (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "monto_max_auto (from proveedor)",
+              "displayName": "monto_max_auto (from proveedor)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "email_remitente",
+              "displayName": "email_remitente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "fecha_vencimiento",
+              "displayName": "fecha_vencimiento",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "neto",
+              "displayName": "neto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "iva",
+              "displayName": "iva",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "confianza_ia",
+              "displayName": "confianza_ia",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Nueva",
+                  "value": "Nueva"
+                },
+                {
+                  "name": "Leida_IA",
+                  "value": "Leida_IA"
+                },
+                {
+                  "name": "Esperando_aprobacion",
+                  "value": "Esperando_aprobacion"
+                },
+                {
+                  "name": "Aprobada",
+                  "value": "Aprobada"
+                },
+                {
+                  "name": "Rechazada",
+                  "value": "Rechazada"
+                },
+                {
+                  "name": "En_revision",
+                  "value": "En_revision"
+                },
+                {
+                  "name": "Error",
+                  "value": "Error"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "codigo_rechazo",
+              "displayName": "codigo_rechazo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "RC-01",
+                  "value": "RC-01"
+                },
+                {
+                  "name": "RC-02",
+                  "value": "RC-02"
+                },
+                {
+                  "name": "RC-03",
+                  "value": "RC-03"
+                },
+                {
+                  "name": "RC-04",
+                  "value": "RC-04"
+                },
+                {
+                  "name": "RC-05",
+                  "value": "RC-05"
+                },
+                {
+                  "name": "RC-06",
+                  "value": "RC-06"
+                },
+                {
+                  "name": "RC-07",
+                  "value": "RC-07"
+                },
+                {
+                  "name": "RC-08",
+                  "value": "RC-08"
+                },
+                {
+                  "name": "RC-09",
+                  "value": "RC-09"
+                },
+                {
+                  "name": "RC-10",
+                  "value": "RC-10"
+                }
+              ],
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "discrepancias",
+              "displayName": "discrepancias",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "adjunto",
+              "displayName": "adjunto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "aprobado_por",
+              "displayName": "aprobado_por",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "fecha_aprobacion",
+              "displayName": "fecha_aprobacion",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "fecha_emision",
+              "displayName": "fecha_emision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Log_Errores",
+              "displayName": "Log_Errores",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        720
+      ],
+      "id": "3ef448cd-1940-4171-97be-97d80344b9b2",
+      "name": "Marcar sin respuesta",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbllY2xXR2yCVLMhX",
+          "mode": "list",
+          "cachedResultName": "Log_Errores",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tbllY2xXR2yCVLMhX"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "resuelto": false,
+            "workflow": "Entrega Final AI Automation",
+            "nodo": "Extraer datos IA",
+            "mensaje_error": "={{ $json.error?.message || JSON.stringify($json.error) || 'Error sin detalle' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "nodo",
+              "displayName": "nodo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "mensaje_error",
+              "displayName": "mensaje_error",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "factura_afectada",
+              "displayName": "factura_afectada",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "resuelto",
+              "displayName": "resuelto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -1360,
+        800
+      ],
+      "id": "bee92a97-d036-4fd1-aa39-54a6a94207e5",
+      "name": "Log error IA",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "app0STyKWmZxgxNZc",
+          "mode": "list",
+          "cachedResultName": "Glowing Beauty - Compras",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbllY2xXR2yCVLMhX",
+          "mode": "list",
+          "cachedResultName": "Log_Errores",
+          "cachedResultUrl": "https://airtable.com/app0STyKWmZxgxNZc/tbllY2xXR2yCVLMhX"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "resuelto": false,
+            "workflow": "Entrega Final AI Automation",
+            "nodo": "Guardar Aprobada",
+            "mensaje_error": "={{ $json.error?.message || JSON.stringify($json.error) || 'Error sin detalle' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "nodo",
+              "displayName": "nodo",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "mensaje_error",
+              "displayName": "mensaje_error",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "factura_afectada",
+              "displayName": "factura_afectada",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "resuelto",
+              "displayName": "resuelto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        -624,
+        800
+      ],
+      "id": "8e2531e4-3a5b-48db-8c3b-3f334c38287f",
+      "name": "Log error Airtable",
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "gRJmDZ6et9VxCNxC",
+          "name": "Airtable account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3fc7a79a-5c7a-4ff3-8d1c-0c88aee50dba",
+              "leftValue": "={{ $json.rechazado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2400,
+        272
+      ],
+      "id": "4ee09d6e-bc20-4f13-8cd8-dc1d1efda709",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a9e64a67-c823-46ee-b1c4-ef1dbf7dc57b",
+              "name": "telegram_chat_id",
+              "value": "8681720119",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -3280,
+        384
+      ],
+      "id": "d365efc8-570a-4b3f-a305-c367ceff8b40",
+      "name": "Config"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validaciones de sobre": {
+      "main": [
+        [
+          {
+            "node": "Buscar proveedor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar proveedor": {
+      "main": [
+        [
+          {
+            "node": "Armar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer texto PDF": {
+      "main": [
+        [
+          {
+            "node": "Validar texto PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar contexto": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar texto PDF": {
+      "main": [
+        [
+          {
+            "node": "Extraer datos IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extraer datos IA",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer datos IA": {
+      "main": [
+        [
+          {
+            "node": "Verificar y calcular",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log error IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar y calcular": {
+      "main": [
+        [
+          {
+            "node": "Rutear factura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rutear factura": {
+      "main": [
+        [
+          {
+            "node": "Guardar Rechazo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardar en revision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardar Aprobada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Aprobada": {
+      "main": [
+        [
+          {
+            "node": "Avisar aprobacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log error Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Rechazo": {
+      "main": [
+        [
+          {
+            "node": "Avisar rechazo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar en revision": {
+      "main": [
+        [
+          {
+            "node": "Pedir aprobacion Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log error Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir aprobacion Telegram": {
+      "main": [
+        [
+          {
+            "node": "Rutear respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rutear respuesta": {
+      "main": [
+        [
+          {
+            "node": "Actualizar aprobada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar rechazada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar en revision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar sin respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar aprobada": {
+      "main": [
+        [
+          {
+            "node": "Avisar aprobacion HITL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar rechazada": {
+      "main": [
+        [
+          {
+            "node": "Avisar rechazo HITL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Guardar Rechazo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extraer texto PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Validaciones de sobre",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f87739f7-a22e-4c75-b59a-3814900cf5e3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "34c53fffb9b04ce6024e255bd4362b52599c181129fc10bec0050d8fa44c3421"
+  },
+  "nodeGroups": [],
+  "id": "kS0pxRnN6RButDgO",
+  "tags": []
+}
